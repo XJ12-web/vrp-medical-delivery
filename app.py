@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,14 +11,16 @@ from solver import solve_cvrptw, extract_routes, compute_total_distance
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
 st.set_page_config(page_title="医药物流配送优化", layout="wide")
-st.title("🚚 城市末端医药物流配送优化")
+st.title("城市末端医药物流配送优化")
 st.markdown("**数据集**: Delivering Data (Zenodo) | **求解器**: Google OR-Tools")
 
 
 @st.cache_data
 def load_all():
-    return load_day_data(r"D:\python\data", day_index=1)
+    return load_day_data(DATA_DIR, day_index=1)
 
 
 @st.cache_data
@@ -41,7 +44,7 @@ def plot_routes(coords, routes, title, color_map):
         xs = [coords[item["node"], 0] for item in route]
         ys = [coords[item["node"], 1] for item in route]
         ax.plot(xs, ys, "-o", color=color, linewidth=2,
-                markersize=5, label=f"车辆 {v}", alpha=0.8)
+                markersize=5, label=f"Vehicle {v}", alpha=0.8)
     ax.set_title(title)
     ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
@@ -49,16 +52,17 @@ def plot_routes(coords, routes, title, color_map):
     return fig
 
 
-# ===== 侧边栏 =====
-st.sidebar.header("参数设置")
+st.sidebar.header("Parameter Settings")
 scenario = st.sidebar.selectbox(
-    "交通场景",
+    "Traffic Scenario",
     ["most_likely", "optimistic", "pessimistic"],
-    format_func=lambda x: {"most_likely": "最可能", "optimistic": "乐观", "pessimistic": "悲观"}[x]
+    format_func=lambda x: {"most_likely": "Most Likely",
+                            "optimistic": "Optimistic",
+                            "pessimistic": "Pessimistic"}[x]
 )
-num_vehicles = st.sidebar.slider("车辆数上限", 3, 6, 4)
-time_limit = st.sidebar.slider("求解时间（秒）", 10, 120, 30)
-run_btn = st.sidebar.button("开始优化")
+num_vehicles = st.sidebar.slider("Max Vehicles", 3, 6, 4)
+time_limit = st.sidebar.slider("Time Limit (s)", 10, 120, 30)
+run_btn = st.sidebar.button("Run Optimization")
 
 data = load_all()
 time_matrix = data[f"time_matrix_{scenario}"]
@@ -66,8 +70,7 @@ coords = compute_coords(data["distance_matrix"])
 color_map = ["red", "blue", "green", "orange", "purple", "brown"]
 
 if run_btn:
-    # 基线
-    with st.spinner("运行基线..."):
+    with st.spinner("Running baseline..."):
         routes_b, dist_b, _, _ = nearest_neighbor_with_tw(
             data["distance_matrix"], time_matrix,
             data["time_windows"], data["demands"],
@@ -75,8 +78,7 @@ if run_btn:
         )
         routes_b_plot = [[{"node": n, "arrival": 0} for n in r] for r in routes_b]
 
-    # OR-Tools
-    with st.spinner(f"OR-Tools 求解中（{time_limit}秒）..."):
+    with st.spinner(f"Solving with OR-Tools ({time_limit}s)..."):
         solution, routing, manager = solve_cvrptw(
             data["distance_matrix"], time_matrix,
             data["time_windows"], data["demands"],
@@ -92,29 +94,27 @@ if run_btn:
         dist_o = compute_total_distance(routes_o, data["distance_matrix"])
         used = sum(1 for r in routes_o if len(r) > 1)
 
-        # 指标卡片
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("基线距离", f"{dist_b:.1f} km")
-        col2.metric("优化距离", f"{dist_o:.1f} km",
+        col1.metric("Baseline Distance", f"{dist_b:.1f} km")
+        col2.metric("Optimized Distance", f"{dist_o:.1f} km",
                     delta=f"-{(dist_b-dist_o):.1f} km")
-        col3.metric("基线车辆", len(routes_b))
-        col4.metric("优化车辆", used, delta=f"{used - len(routes_b)}")
+        col3.metric("Baseline Vehicles", len(routes_b))
+        col4.metric("Optimized Vehicles", used)
 
-        st.markdown(f"**距离减少**: {(dist_b-dist_o)/dist_b*100:.1f}%")
+        st.markdown(f"**Distance Reduction**: {(dist_b-dist_o)/dist_b*100:.1f}%")
 
-        # 两图并排
         c1, c2 = st.columns(2)
         with c1:
             fig1 = plot_routes(coords, routes_b_plot,
-                               f"基线（最近邻）{dist_b:.1f} km / {len(routes_b)} 辆",
+                               f"Baseline (Nearest Neighbor) {dist_b:.1f} km / {len(routes_b)} vehicles",
                                color_map)
             st.pyplot(fig1)
         with c2:
             fig2 = plot_routes(coords, routes_o,
-                               f"OR-Tools {dist_o:.1f} km / {used} 辆",
+                               f"OR-Tools {dist_o:.1f} km / {used} vehicles",
                                color_map)
             st.pyplot(fig2)
     else:
-        st.error(f"OR-Tools 在 {num_vehicles} 辆车下无可行解，请增大车辆数。")
+        st.error(f"No feasible solution with {num_vehicles} vehicles. Try increasing.")
 else:
-    st.info("👈 在左侧设置参数，点击「开始优化」运行。")
+    st.info("Set parameters on the left, then click 'Run Optimization'.")
