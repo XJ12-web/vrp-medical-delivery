@@ -1,21 +1,19 @@
 import os
 import streamlit as st
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.manifold import MDS
 
 from data_loader import load_day_data
 from baselines import nearest_neighbor_with_tw
 from solver import solve_cvrptw, extract_routes, compute_total_distance
 
-plt.rcParams['font.sans-serif'] = ['SimHei']
-plt.rcParams['axes.unicode_minus'] = False
-
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
-st.set_page_config(page_title="医药物流配送优化", layout="wide")
-st.title("城市末端医药物流配送优化")
-st.markdown("**数据集**: Delivering Data (Zenodo) | **求解器**: Google OR-Tools")
+st.set_page_config(page_title="VRP Optimization", layout="wide")
+st.title("City Last-Mile Medical Delivery Optimization")
+st.markdown("**Dataset**: Delivering Data (Zenodo) | **Solver**: Google OR-Tools")
 
 
 @st.cache_data
@@ -25,12 +23,22 @@ def load_all():
 
 @st.cache_data
 def compute_coords(dist_matrix):
+    """Classic MDS implemented with numpy (no sklearn dependency)."""
     D = np.array(dist_matrix, dtype=float)
-    D = (D + D.T) / 2
-    np.fill_diagonal(D, 0)
-    mds = MDS(n_components=2, metric="precomputed", random_state=42,
-              n_init=4, max_iter=300, init="random", normalized_stress=False)
-    return mds.fit_transform(D)
+    D = (D + D.T) / 2.0
+    np.fill_diagonal(D, 0.0)
+
+    n = D.shape[0]
+    H = np.eye(n) - np.ones((n, n)) / n
+    B = -0.5 * H @ (D ** 2) @ H
+
+    eigvals, eigvecs = np.linalg.eigh(B)
+    idx = np.argsort(eigvals)[::-1]
+    eigvals = eigvals[idx]
+    eigvecs = eigvecs[:, idx]
+
+    eigvals = np.maximum(eigvals[:2], 0)
+    return eigvecs[:, :2] * np.sqrt(eigvals)
 
 
 def plot_routes(coords, routes, title, color_map):
@@ -97,21 +105,21 @@ if run_btn:
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Baseline Distance", f"{dist_b:.1f} km")
         col2.metric("Optimized Distance", f"{dist_o:.1f} km",
-                    delta=f"-{(dist_b-dist_o):.1f} km")
+                    delta=f"-{(dist_b - dist_o):.1f} km")
         col3.metric("Baseline Vehicles", len(routes_b))
         col4.metric("Optimized Vehicles", used)
 
-        st.markdown(f"**Distance Reduction**: {(dist_b-dist_o)/dist_b*100:.1f}%")
+        st.markdown(f"**Distance Reduction**: {(dist_b - dist_o) / dist_b * 100:.1f}%")
 
         c1, c2 = st.columns(2)
         with c1:
             fig1 = plot_routes(coords, routes_b_plot,
-                               f"Baseline (Nearest Neighbor) {dist_b:.1f} km / {len(routes_b)} vehicles",
+                               f"Baseline (Nearest Neighbor) — {dist_b:.1f} km / {len(routes_b)} vehicles",
                                color_map)
             st.pyplot(fig1)
         with c2:
             fig2 = plot_routes(coords, routes_o,
-                               f"OR-Tools {dist_o:.1f} km / {used} vehicles",
+                               f"OR-Tools — {dist_o:.1f} km / {used} vehicles",
                                color_map)
             st.pyplot(fig2)
     else:
